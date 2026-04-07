@@ -67,6 +67,7 @@ function ensureSchema(db: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
 
+    -- 订单主键列名为 id（与 /admin/orders 等查询中的 o.id 一致；若线上仅有 order_id，由 ensureLegacyOrderIdColumn 迁移补齐）。
     CREATE TABLE IF NOT EXISTS orders (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL,

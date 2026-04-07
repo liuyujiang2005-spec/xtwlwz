@@ -73,6 +73,16 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     return info.some((r) => r.name === column);
   }
 
+  /**
+   * 解析订单主键在 SQL 中的表达式（与 `ensureSchema` 中 orders 表定义一致：标准列为 `id`）。
+   * 线上若存在仅含 `order_id` 的旧表结构，则回退到 `o.order_id`；极端情况下用 rowid。
+   */
+  function resolveOrdersPrimaryKeyExpr(): string {
+    if (hasOrderColumn("id")) return "o.id";
+    if (hasOrderColumn("order_id")) return "o.order_id";
+    return "CAST(o.rowid AS TEXT)";
+  }
+
   app.get("/admin/users", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
@@ -114,10 +124,12 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
 
+    const orderPkExpr = resolveOrdersPrimaryKeyExpr();
+
     /**
-     * 读取管理员订单列表；orderIdExpr 允许在 id/order_id 历史结构间切换。
+     * 读取管理员订单列表；`orderPkExpr` 与当前库 orders 真实主键列对齐（见 resolveOrdersPrimaryKeyExpr）。
      */
-    function queryAdminOrders(orderIdExpr: "o.id" | "o.order_id" | "CAST(o.rowid AS TEXT)"): Array<{
+    function queryAdminOrders(orderIdExpr: string): Array<{
       id: string;
       client_id: string;
       client_name: string | null;
@@ -242,48 +254,7 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       }>;
     }
 
-    let rows: Array<{
-      id: string;
-      client_id: string;
-      client_name: string | null;
-      warehouse_id: string;
-      order_no: string | null;
-      item_name: string;
-      transport_mode: string;
-      domestic_tracking_no: string | null;
-      batch_no: string | null;
-      approval_status: string;
-      product_quantity: number;
-      package_count: number;
-      package_unit: string;
-      weight_kg: number | null;
-      volume_m3: number | null;
-      receiver_address_th: string | null;
-      receivable_amount_cny: number | null;
-      receivable_currency: string | null;
-      payment_status: string | null;
-      paid_at: string | null;
-      paid_by: string | null;
-      ship_date: string | null;
-      status_group: string;
-      created_at: string;
-      updated_at: string;
-      shipment_id: string | null;
-      tracking_no: string | null;
-      current_status: string | null;
-      container_no: string | null;
-    }>;
-
-    // 三重保险：id/order_id/rowid 依次回退，确保历史脏库也能返回列表。
-    const hasIdColumn = hasOrderColumn("id");
-    const hasLegacyOrderIdColumn = hasOrderColumn("order_id");
-    if (hasIdColumn) {
-      rows = queryAdminOrders("o.id");
-    } else if (hasLegacyOrderIdColumn) {
-      rows = queryAdminOrders("o.order_id");
-    } else {
-      rows = queryAdminOrders("CAST(o.rowid AS TEXT)");
-    }
+    const rows = queryAdminOrders(orderPkExpr);
 
     const adminOrderItems = rows.map((r) => ({
       id: r.id,
