@@ -273,15 +273,8 @@ export default function AdminHomePage() {
   }, []);
 
   const loadOrders = useCallback(async () => {
-    try {
-      const list = await fetchAdminOrders();
-      setOrderList(list);
-    } catch (error) {
-      // 止血策略：订单接口异常时不阻断管理端其他模块，先回退为空列表。
-      setOrderList([]);
-      const text = error instanceof Error ? error.message : "订单加载失败";
-      setToast(`订单模块暂时不可用：${text}`);
-    }
+    const list = await fetchAdminOrders();
+    setOrderList(list);
   }, []);
 
   /**

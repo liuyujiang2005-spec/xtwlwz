@@ -398,22 +398,32 @@ function ensureAdditionalColumns(db: DatabaseSync): void {
   }
 }
 
+/**
+ * 兼容历史订单主键字段：同时保证 id/order_id 两列存在并互相回填。
+ * 这样即使线上实例运行到旧 SQL（引用 o.id 或 o.order_id）也不会报列不存在。
+ */
 function ensureLegacyOrderIdColumn(db: DatabaseSync): void {
   const hasId = hasColumn(db, "orders", "id");
   const hasOrderId = hasColumn(db, "orders", "order_id");
   const hasOrderNo = hasColumn(db, "orders", "order_no");
-  if (hasId) return;
 
-  db.exec("ALTER TABLE orders ADD COLUMN id TEXT;");
-  if (hasOrderId) {
-    db.exec("UPDATE orders SET id = order_id WHERE id IS NULL OR TRIM(id) = '';");
-    return;
+  if (!hasId) {
+    db.exec("ALTER TABLE orders ADD COLUMN id TEXT;");
   }
-  if (hasOrderNo) {
-    db.exec("UPDATE orders SET id = COALESCE(NULLIF(order_no, ''), 'legacy-' || rowid) WHERE id IS NULL OR TRIM(id) = '';");
-    return;
+  if (!hasOrderId) {
+    db.exec("ALTER TABLE orders ADD COLUMN order_id TEXT;");
   }
-  db.exec("UPDATE orders SET id = 'legacy-' || rowid WHERE id IS NULL OR TRIM(id) = '';");
+
+  db.exec(`
+    UPDATE orders
+    SET id = COALESCE(NULLIF(id, ''), NULLIF(order_id, ''), ${hasOrderNo ? "NULLIF(order_no, '')," : ""} 'legacy-' || rowid)
+    WHERE id IS NULL OR TRIM(id) = ''
+  `);
+  db.exec(`
+    UPDATE orders
+    SET order_id = COALESCE(NULLIF(order_id, ''), NULLIF(id, ''))
+    WHERE order_id IS NULL OR TRIM(order_id) = ''
+  `);
 }
 
 function estimateReceivableAmountCny(input: {
