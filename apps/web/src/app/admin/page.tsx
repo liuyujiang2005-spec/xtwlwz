@@ -109,6 +109,7 @@ export default function AdminHomePage() {
   const [content, setContent] = useState("");
   const [staffPanelCollapsed, setStaffPanelCollapsed] = useState(false);
   const [ordersPanelCollapsed, setOrdersPanelCollapsed] = useState(false);
+  const [orderSearchKeyword, setOrderSearchKeyword] = useState("");
   const [editingOrderId, setEditingOrderId] = useState("");
   const [orderEditForm, setOrderEditForm] = useState({
     trackingNo: "",
@@ -220,6 +221,33 @@ export default function AdminHomePage() {
     return set.size;
   }, [orderList]);
 
+  /**
+   * 统一标准化订单检索关键词，便于大小写无关匹配。
+   */
+  const normalizeOrderSearchText = (text: string): string => text.trim().toLowerCase();
+
+  /**
+   * 订单管理列表按关键词筛选（运单号/客户/品名/批次/国内单号/地址）。
+   */
+  const filteredOrderList = useMemo(() => {
+    const keyword = normalizeOrderSearchText(orderSearchKeyword);
+    if (!keyword) return orderList;
+    return orderList.filter((item) => {
+      const haystack = [
+        item.trackingNo ?? "",
+        item.clientName ?? "",
+        item.clientId ?? "",
+        item.itemName ?? "",
+        item.batchNo ?? "",
+        item.domesticTrackingNo ?? "",
+        item.receiverAddressTh ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }, [orderList, orderSearchKeyword]);
+
   // 判断 hash 是否为有效的功能分区 id。
   const isSectionId = (value: string): value is (typeof SECTION_IDS)[number] =>
     SECTION_IDS.includes(value as (typeof SECTION_IDS)[number]);
@@ -245,8 +273,15 @@ export default function AdminHomePage() {
   }, []);
 
   const loadOrders = useCallback(async () => {
-    const list = await fetchAdminOrders();
-    setOrderList(list);
+    try {
+      const list = await fetchAdminOrders();
+      setOrderList(list);
+    } catch (error) {
+      // 止血策略：订单接口异常时不阻断管理端其他模块，先回退为空列表。
+      setOrderList([]);
+      const text = error instanceof Error ? error.message : "订单加载失败";
+      setToast(`订单模块暂时不可用：${text}`);
+    }
   }, []);
 
   /**
@@ -533,11 +568,11 @@ export default function AdminHomePage() {
   };
 
   const exportOrdersToExcel = () => {
-    if (orderList.length === 0) {
+    if (filteredOrderList.length === 0) {
       setMessage("当前没有可导出的订单数据。");
       return;
     }
-    const rows = orderList.map((o) => ({
+    const rows = filteredOrderList.map((o) => ({
       订单号: o.id,
       客户: o.clientName ?? o.clientId ?? "-",
       品名: o.itemName,
@@ -1019,14 +1054,14 @@ export default function AdminHomePage() {
             <button
               type="button"
               onClick={exportOrdersToExcel}
-              disabled={orderList.length === 0}
+              disabled={filteredOrderList.length === 0}
               style={{
                 border: "none",
                 borderRadius: 8,
                 padding: "6px 12px",
                 color: "#fff",
-                background: orderList.length === 0 ? "#94a3b8" : "#2563eb",
-                cursor: orderList.length === 0 ? "not-allowed" : "pointer",
+                background: filteredOrderList.length === 0 ? "#94a3b8" : "#2563eb",
+                cursor: filteredOrderList.length === 0 ? "not-allowed" : "pointer",
               }}
             >
               导出Excel
@@ -1041,9 +1076,17 @@ export default function AdminHomePage() {
             </button>
           </div>
         </div>
+        <div style={{ marginBottom: 10 }}>
+          <input
+            value={orderSearchKeyword}
+            onChange={(e) => setOrderSearchKeyword(e.target.value)}
+            placeholder="查找订单：运单号 / 客户 / 品名 / 批次号 / 国内单号 / 收货地址"
+            style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+          />
+        </div>
         {ordersPanelCollapsed ? (
           <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>已折叠。点击「展开」可查看订单列表并导出 Excel。</p>
-        ) : orderList.length === 0 ? (
+        ) : filteredOrderList.length === 0 ? (
           <EmptyStateCard title="暂无订单" description="当前公司下暂无订单数据。" />
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -1123,7 +1166,7 @@ export default function AdminHomePage() {
                 </tr>
               </thead>
               <tbody>
-                {orderList.map((o) => (
+                {filteredOrderList.map((o) => (
                   <tr key={o.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
                     <td style={{ padding: "8px 6px", fontWeight: 600, color: "#1e3a8a", whiteSpace: "nowrap" }}>
                       {o.trackingNo ?? "—"}
