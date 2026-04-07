@@ -117,7 +117,7 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     /**
      * 读取管理员订单列表；orderIdExpr 允许在 id/order_id 历史结构间切换。
      */
-    function queryAdminOrders(orderIdExpr: "o.id" | "o.order_id"): Array<{
+    function queryAdminOrders(orderIdExpr: "o.id" | "o.order_id" | "CAST(o.rowid AS TEXT)"): Array<{
       id: string;
       client_id: string;
       client_name: string | null;
@@ -274,19 +274,15 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       container_no: string | null;
     }>;
 
-    // 双保险：先按探测列查询，若线上库结构异常再自动切换另一列重试。
-    try {
-      const preferredExpr: "o.id" | "o.order_id" = hasOrderColumn("id") ? "o.id" : "o.order_id";
-      rows = queryAdminOrders(preferredExpr);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      if (message.includes("no such column: o.id")) {
-        rows = queryAdminOrders("o.order_id");
-      } else if (message.includes("no such column: o.order_id")) {
-        rows = queryAdminOrders("o.id");
-      } else {
-        throw error;
-      }
+    // 三重保险：id/order_id/rowid 依次回退，确保历史脏库也能返回列表。
+    const hasIdColumn = hasOrderColumn("id");
+    const hasLegacyOrderIdColumn = hasOrderColumn("order_id");
+    if (hasIdColumn) {
+      rows = queryAdminOrders("o.id");
+    } else if (hasLegacyOrderIdColumn) {
+      rows = queryAdminOrders("o.order_id");
+    } else {
+      rows = queryAdminOrders("CAST(o.rowid AS TEXT)");
     }
 
     const adminOrderItems = rows.map((r) => ({
